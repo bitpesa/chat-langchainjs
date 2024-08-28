@@ -20,10 +20,9 @@ import {
   MessagesPlaceholder,
 } from "@langchain/core/prompts";
 
-import weaviate, { ApiKey } from "weaviate-ts-client";
-import { WeaviateStore } from "@langchain/weaviate";
-
-export const runtime = "edge";
+import { PineconeStore } from "@langchain/pinecone";
+import { Pinecone } from "@pinecone-database/pinecone";
+import { getBedrockEmbeddings } from "@/app/utils/getBedrockEmbeddings";
 
 const RESPONSE_TEMPLATE = `You are an expert programmer and problem-solver, tasked to answer any question about Langchain.
 Using the provided context, answer the user's question to the best of your ability using the resources provided.
@@ -63,31 +62,27 @@ type RetrievalChainInput = {
 };
 
 const getRetriever = async () => {
-  if (
-    !process.env.WEAVIATE_INDEX_NAME ||
-    !process.env.WEAVIATE_API_KEY ||
-    !process.env.WEAVIATE_URL
-  ) {
+  if (!process.env.PINECONE_API_KEY) {
     throw new Error(
-      "WEAVIATE_INDEX_NAME, WEAVIATE_API_KEY and WEAVIATE_URL environment variables must be set",
+      "PINECONE_API_KEY and PINECONE_ENVIRONMENT environment variables must be set",
     );
   }
 
-  const client = weaviate.client({
-    scheme: "https",
-    host: process.env.WEAVIATE_URL,
-    apiKey: new ApiKey(process.env.WEAVIATE_API_KEY),
-  });
-  const vectorstore = await WeaviateStore.fromExistingIndex(
-    new OpenAIEmbeddings({}),
-    {
-      client,
-      indexName: process.env.WEAVIATE_INDEX_NAME,
-      textKey: "text",
-      metadataKeys: ["source", "title"],
-    },
+  const embeddingsModel = await getBedrockEmbeddings();
+
+  const pinecone = new Pinecone();
+  const pineconeIndex = pinecone.index("aza-docs-demo-idx");
+
+  const dbConfig = {
+    pineconeIndex,
+  };
+
+  const vectorstore = await PineconeStore.fromExistingIndex(
+    embeddingsModel,
+    dbConfig,
   );
-  return vectorstore.asRetriever({ k: 6 });
+
+  return vectorstore.asRetriever();
 };
 
 const createRetrieverChain = (llm: BaseChatModel, retriever: Runnable) => {
@@ -151,7 +146,7 @@ const serializeHistory = (input: any) => {
   return convertedChatHistory;
 };
 
-const createChain = (llm: BaseChatModel, retriever: Runnable) => {
+const createChain = (llm: BaseChatModel, retriever: any) => {
   const retrieverChain = createRetrieverChain(llm, retriever);
   const context = RunnableMap.from({
     context: RunnableSequence.from([
